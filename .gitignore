@@ -1,6 +1,7 @@
 # my custom files
 *.jpg
 .DS_Store
+*.pkl
 # my custom directory
 work_dir/
 wandb/
