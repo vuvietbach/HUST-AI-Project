@@ -5,6 +5,8 @@
 # my custom directory
 work_dir/
 wandb/
+data/
+images/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

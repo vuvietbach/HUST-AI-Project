@@ -6,3 +6,5 @@ pip install -e .
 python tools/train.py
 # test script
 python tools/test.py
+
+python tools/demo.py

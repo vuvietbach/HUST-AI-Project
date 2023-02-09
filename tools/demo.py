@@ -1,7 +1,11 @@
 import cv2
 import time
+import torch
+import numpy as np
+from FER.models.CnnModule import CNNModule
 RED_COLOR_CODE = (0, 0, 255)
-
+DEVICE = torch.device('cuda:3')
+CLASSES = ['neutral','happiness','surprise','sadness','anger','disgust','fear','contempt','unknown','NF']
 def drawBoundingBoxes(imageData, inferenceResults, color):
     """Draw bounding boxes on an image.
     imageData: image data in numpy array format
@@ -9,42 +13,23 @@ def drawBoundingBoxes(imageData, inferenceResults, color):
     inferenceResults: inference results array off object (l,t,w,h)
     colorMap: Bounding box color candidates, list of RGB tuples.
     """
+    thick = 2
+    imgHeight, _, _ = imageData.shape
     for res in inferenceResults:
-        left = int(res['left'])
-        top = int(res['top'])
-        right = int(res['left']) + int(res['width'])
-        bottom = int(res['top']) + int(res['height'])
+        x, y, w, h = res['pos']
         label = res['label']
-        imgHeight, imgWidth, _ = imageData.shape
-        thick = int((imgHeight + imgWidth) // 900)
-        cv2.rectangle(imageData,(left, top), (right, bottom), color, thick)
-        cv2.putText(imageData, label, (left, top - 12), 0, 1e-3 * imgHeight, color, thick//3)
+        label = res['label']
+        cv2.rectangle(imageData,(x, y), (x+w, y+h), color, thick)
+        cv2.putText(imageData, label, (x, y - 12), 0, 1e-3 * imgHeight, color, thick)
     return imageData
 
-
-def inference(frame, face_detector, classifier):
-    frame_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-    frame_gray = cv.equalizeHist(frame_gray)
-    faces = face_detector(frame)
-
-    for (x, y, w, h) in faces:
-        # Extract image
-        positions = None
-
-        # Normalize
-        # Batching
-        images=None
-    labels = classifier(images)
-    labels = np.argmax(labels, 1)
-    # Extract string name of labels
-    labels = None
-    return positions, labels
 
 
 class VideoCapture():
     def __init__(self, read_path = None, write_path = None):
         if read_path == None:
             self.stream = cv2.VideoCapture(0)
+        
         else:
             self.stream = cv2.VideoCapture(read_path)
             
@@ -69,7 +54,7 @@ class VideoCapture():
         return self.stream.isOpened()
 
     def write(self, frame):
-        if self.mode == 'screen':
+        if self.write_mode == 'screen':
             cv2.imshow('frame',frame)
         else:
             self.out.write(frame)
@@ -77,36 +62,94 @@ class VideoCapture():
     def release(self):
         self.stream.release()
         cv2.destroyAllWindows()
-        if self.mode == 'video':
+        if self.write_mode == 'video':
             self.out.release()
 
+class FaceRecognition():
+    def __init__(self, haarcascade_path, ckpt_path, label_names, device='cpu') -> None:
+        
+        self.detector = cv2.CascadeClassifier(haarcascade_path)
+        
+        self.classifier = CNNModule.load_from_checkpoint(ckpt_path).to(device)
+        torch.set_grad_enabled(False)
+        self.classifier.eval()
+        
+        self.device = device
+        self.face_size = (64, 64)
+        self.label_names = label_names
     
+    def preprocess_detector(self, img):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return gray
+    
+    def preprocess_classifier(self, img):
+        img = cv2.resize(img, self.face_size)
+        img = img / 255.0
+        img = torch.from_numpy(img).to(self.device).float()
+        return img
+    
+    def __call__(self, img):
+        img = self.preprocess_detector(img)
+        results = self.detector.detectMultiScale(img)
+        poss = []
+        faces = []
+        for (x, y, w, h) in results:
+            face = img[y:y+h, x:x+w]
+            face = self.preprocess_classifier(face)
+            faces.append(face)
+            poss.append((x, y, w, h))
+        
+        if len(faces) == 0:
+            return []
+    
+        faces = torch.stack(faces)
+        faces = faces.unsqueeze(1)
+        labels = self.classifier(faces)
+        labels = torch.argmax(labels, 1)
+
+        labels = [self.label_names[labels[i]] for i in range(len(labels))]
+        result_wlabels = [dict(pos=pos, label=label) for pos, label in zip(poss, labels)]
+
+        return result_wlabels
+
+def test():
+
+
+    img_path = 'test_images/img_1.png'
+    img = cv2.imread(img_path)
+
+    res = recognizer(img)
+    img = drawBoundingBoxes(img, res, RED_COLOR_CODE)
+    
+    write_path = 'test_images/processed_img.png'
+    cv2.imwrite(write_path, img)
+
+def build_recognizer():
+    cascade_path = 'haarcascade/haarcascade_frontalface_default.xml'
+    ckpt_path = 'work_dir/Best_Checkpoint-v3.ckpt'
+    recognizer = FaceRecognition(cascade_path, ckpt_path, CLASSES, DEVICE)
+    return recognizer
 
 def main():
-    device='cuda:3'
-    # define model
-    model = CustomCNNModule.load_from_checkpoint(ckpt_path).to(device)
-    face_cascade = cv2.CascadeClassifier('haarcascade/haarcascade_frontalface_default.xml')
-    # load checkpoint
-  
+    recognizer = build_recognizer()  
   
     # define a video capture object
-    vid = VideoCapture()
+    read_path = 'test_images/Movie on 28-01-2023 at 20.29.mov'
+    write_path = 'out.avi'
+    vid = VideoCapture(read_path, write_path)
     
     while(True):
         start_time = time.time() # start time of the loop
-        ## READ ##########
+        
         ret, frame = vid.read()
         if ret == False:
             break
-        #################
        
-        # INFERENCE #####
-        inferenceResults = inference(frame)
+        results = recognizer(frame)
         #################
         
         # WRITE #########
-        frame = drawBoundingBoxes(frame, inferenceResults, RED_COLOR_CODE)
+        frame = drawBoundingBoxes(frame, results, RED_COLOR_CODE)
         vid.write(frame)
         #################
         

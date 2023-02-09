@@ -1,2 +1,2 @@
-from .CustomCnn import CustomCNNModule, CustomCnnModel
-__all__ = ['CustomCNNModule', 'CustomCnnModel']
+from .CnnModule import CNNModule, CnnModel
+__all__ = ['CNNModule', 'CnnModel']
