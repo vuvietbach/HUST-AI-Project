@@ -2,6 +2,7 @@
 *.jpg
 .DS_Store
 *.pkl
+*.ckpt
 # my custom directory
 work_dir/
 wandb/
